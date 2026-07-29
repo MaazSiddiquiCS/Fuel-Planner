@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fuel-planner"
+version = "0.1.0"
+description = "Route planning API with cost-effective fuel stop recommendations."
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.2,<7.0",
+    "djangorestframework>=3.16,<4.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "requests>=2.32,<3.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.setuptools.packages.find]
+include = ["apps*", "config*"]
