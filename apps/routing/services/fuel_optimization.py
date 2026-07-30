@@ -36,14 +36,6 @@ class FuelPlan:
     total_fuel_cost: Decimal
 
 
-@dataclass(frozen=True)
-class RouteNode:
-    kind: str
-    distance_along_route_miles: float
-    price: Decimal
-    station: CandidateStation | None = None
-
-
 class FuelOptimizationService:
     def optimize(self, route: Any) -> FuelPlan:
         coordinates = self._extract_coordinates(route.geometry)
@@ -56,15 +48,13 @@ class FuelOptimizationService:
         if route.distance_miles <= MAX_VEHICLE_RANGE_MILES and not candidates:
             return FuelPlan(fuel_stops=[], total_fuel_cost=Decimal("0.00"))
 
-        path = self._find_optimal_path(
+        return self._select_fuel_stops(
             candidates=sorted(
                 candidates,
                 key=lambda station: station.distance_along_route_miles,
             ),
             total_distance_miles=route.distance_miles,
         )
-
-        return self._build_fuel_plan(path)
 
     def _extract_coordinates(self, geometry):
         if geometry.get("type") != "LineString":
@@ -139,133 +129,67 @@ class FuelOptimizationService:
 
         return candidates
 
-    def _find_optimal_path(self, candidates, total_distance_miles):
-        nodes = [
-            RouteNode(
-                kind="start",
-                distance_along_route_miles=0.0,
-                price=Decimal("0"),
-            ),
-            *[
-                RouteNode(
-                    kind="station",
-                    distance_along_route_miles=station.distance_along_route_miles,
-                    price=station.retail_price,
-                    station=station,
-                )
-                for station in candidates
-            ],
-            RouteNode(
-                kind="destination",
-                distance_along_route_miles=total_distance_miles,
-                price=Decimal("0"),
-            ),
-        ]
 
-        best_costs: list[Decimal | None] = [None] * len(nodes)
-        previous_nodes: list[int | None] = [None] * len(nodes)
-        best_costs[0] = Decimal("0")
-
-        for index, current_node in enumerate(nodes[:-1]):
-            current_cost = best_costs[index]
-
-            if current_cost is None:
-                continue
-
-            next_index = index + 1
-            while next_index < len(nodes):
-                next_node = nodes[next_index]
-                distance_delta = (
-                    next_node.distance_along_route_miles
-                    - current_node.distance_along_route_miles
-                )
-
-                if distance_delta > MAX_VEHICLE_RANGE_MILES:
-                    break
-
-                transition_cost = self._calculate_transition_cost(
-                    current_node=current_node,
-                    next_node=next_node,
-                )
-                candidate_cost = current_cost + transition_cost
-
-                if best_costs[next_index] is None or candidate_cost < best_costs[next_index]:
-                    best_costs[next_index] = candidate_cost
-                    previous_nodes[next_index] = index
-
-                next_index += 1
-
-        if best_costs[-1] is None:
-            raise FuelOptimizationError(
-                "No fuel station is available within the vehicle range."
-            )
-
-        path = []
-        current_index: int | None = len(nodes) - 1
-
-        while current_index is not None:
-            path.append(nodes[current_index])
-            current_index = previous_nodes[current_index]
-
-        return list(reversed(path))
-
-    def _calculate_transition_cost(self, current_node, next_node):
-        if current_node.kind == "start":
-            return Decimal("0")
-
-        segment_miles = Decimal(
-            str(
-                next_node.distance_along_route_miles
-                - current_node.distance_along_route_miles
-            )
-        )
-        return segment_miles / Decimal(str(FUEL_EFFICIENCY_MPG)) * current_node.price
-
-    def _build_fuel_plan(self, path):
+    def _select_fuel_stops(self, candidates, total_distance_miles):
         fuel_stops = []
         total_cost = Decimal("0")
+        covered_distance = 0.0
 
-        for index, current_node in enumerate(path[:-1]):
-            if current_node.kind != "station":
-                continue
-
-            next_node = path[index + 1]
-            leg_miles = Decimal(
-                str(
-                    next_node.distance_along_route_miles
-                    - current_node.distance_along_route_miles
-                )
+        while covered_distance < total_distance_miles:
+            leg_end = min(
+                covered_distance + MAX_VEHICLE_RANGE_MILES,
+                total_distance_miles,
             )
+            reachable_candidates = [
+                station
+                for station in candidates
+                if covered_distance <= station.distance_along_route_miles <= leg_end
+            ]
+
+            if not reachable_candidates:
+                raise FuelOptimizationError(
+                    "No fuel station is available within the vehicle range."
+                )
+
+            selected_station = min(
+                reachable_candidates,
+                key=lambda station: (
+                    station.retail_price,
+                    station.distance_from_route_miles,
+                    station.distance_along_route_miles,
+                ),
+            )
+
+            leg_miles = Decimal(str(leg_end - covered_distance))
             gallons = leg_miles / Decimal(str(FUEL_EFFICIENCY_MPG))
-            estimated_cost = (gallons * current_node.price).quantize(
+            estimated_cost = (gallons * selected_station.retail_price).quantize(
                 Decimal("0.01"),
                 rounding=ROUND_HALF_UP,
             )
             total_cost += estimated_cost
-            station = current_node.station
-
             fuel_stops.append(
                 {
-                    "truckstop_id": station.truckstop_id,
-                    "name": station.name,
-                    "address": station.address,
-                    "city": station.city,
-                    "state": station.state,
-                    "retail_price": station.retail_price,
-                    "latitude": station.latitude,
-                    "longitude": station.longitude,
+                    "truckstop_id": selected_station.truckstop_id,
+                    "name": selected_station.name,
+                    "address": selected_station.address,
+                    "city": selected_station.city,
+                    "state": selected_station.state,
+                    "retail_price": selected_station.retail_price,
+                    "latitude": selected_station.latitude,
+                    "longitude": selected_station.longitude,
                     "distance_along_route_miles": round(
-                        station.distance_along_route_miles,
+                        selected_station.distance_along_route_miles,
                         2,
                     ),
                     "distance_from_route_miles": round(
-                        station.distance_from_route_miles,
+                        selected_station.distance_from_route_miles,
                         2,
                     ),
                     "gallons": gallons.quantize(Decimal("0.01")),
                     "estimated_cost": estimated_cost,
                 }
             )
+            covered_distance = leg_end
 
         return FuelPlan(
             fuel_stops=fuel_stops,
