@@ -1,0 +1,6 @@
+django<7.0,>=5.2
+djangorestframework<4.0,>=3.16
+python-dotenv<2.0,>=1.0
+psycopg[binary]<4.0,>=3.2
+requests<3.0,>=2.32
+uvicorn[standard]<1.0,>=0.30

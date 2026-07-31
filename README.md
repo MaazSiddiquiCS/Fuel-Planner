@@ -214,11 +214,3 @@ The optimizer uses a practical take-home heuristic:
 This is fast for an 8k-row station dataset and easy to explain in a short Loom.
 In a production system, this could evolve further with starting-fuel state,
 detour-time constraints, truck restrictions, and preferred brands.
-
-## Loom Checklist
-
-- Show the API request in Postman or similar.
-- Demonstrate a valid route between two US locations.
-- Show the fuel stops and total cost in the response.
-- Briefly explain the import and geocoding commands.
-- Keep the video under 5 minutes.
